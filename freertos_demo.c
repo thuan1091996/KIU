@@ -38,7 +38,7 @@
 #include "task.h"
 #include "queue.h"
 #include "semphr.h"
-
+#include "motorsdrive_task.h"
 //*****************************************************************************
 //
 //! \addtogroup example_list
@@ -185,7 +185,6 @@ main(void)
     //
     if(LEDTaskInit() != 0)
     {
-
         while(1)
         {
         }
@@ -200,6 +199,21 @@ main(void)
         while(1)
         {
         }
+    }
+
+    //*****************************************************************************
+    //
+    // Create Motor drives task
+    //
+    //*****************************************************************************
+
+    if (DriveMotorsTaskInit() != pdPASS)
+    {
+        while(1)
+        {
+            //FIXME:
+        }
+
     }
 
     //
