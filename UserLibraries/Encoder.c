@@ -183,10 +183,9 @@ void Update_Position1(float *Pt_Pos1)
 //******************************************************************************
 void Update_Velocity0(int16_t *Pt_Vel0)
 {
-    int8_t temp_dir=0;
-    temp_dir=QEIDirectionGet(QEI0_BASE);
-    *Pt_Vel0= (uint16_t)((QEIVelocityGet(QEI0_BASE)*60.0)/(1.0*ENCODER0_RESOLUTION*SPEED_SAMPLE_PERIOD));
-    *Pt_Vel0 *=temp_dir;
+    float speed_f = (QEIVelocityGet(QEI0_BASE) * 60.0) / (1.0 * ENCODER0_RESOLUTION * SPEED_SAMPLE_PERIOD);
+    speed_f *= QEIDirectionGet(QEI1_BASE);
+    *Pt_Vel0= (int16_t)(speed_f);
 };
 
 // *****************************************************************************
@@ -196,10 +195,9 @@ void Update_Velocity0(int16_t *Pt_Vel0)
 //******************************************************************************
 void Update_Velocity1(int16_t *Pt_Vel1)
 {
-    int8_t temp_dir=0;
-    temp_dir=QEIDirectionGet(QEI1_BASE);
-    *Pt_Vel1= (uint16_t)((QEIVelocityGet(QEI1_BASE)*60.0)/(1.0*ENCODER1_RESOLUTION*SPEED_SAMPLE_PERIOD));
-    *Pt_Vel1 *=temp_dir;
+    float speed_f = (QEIVelocityGet(QEI1_BASE) * 60.0)/(1.0 * ENCODER1_RESOLUTION * SPEED_SAMPLE_PERIOD);
+    speed_f *= QEIDirectionGet(QEI1_BASE);;
+    *Pt_Vel1= (int16_t)(speed_f);
 };
 
 #endif /* USERLIBRARIES_ENCODER_C_ */
