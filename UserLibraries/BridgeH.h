@@ -71,27 +71,27 @@ void BridgeH_GPIO_Init(void);
 void BridgeH_PWM_Init(void);
 
 void Motor0_UpdateSpeed(int8_t i8_M0Duty);
-void Motor0_Forward(void);
-void Motor0_Backward(void);
-void Motor0_Stop(void);
+static void Motor0_Forward(void);
+static void Motor0_Backward(void);
+static void Motor0_Stop(void);
 
 
 void Motor1_UpdateSpeed(int8_t i8_M1Duty);
-void Motor1_Forward(void);
-void Motor1_Backward(void);
-void Motor1_Stop(void);
+static void Motor1_Forward(void);
+static void Motor1_Backward(void);
+static void Motor1_Stop(void);
 
 void Motor2_UpdateSpeed(int8_t i8_M2Duty);
-void Motor2_Forward(void);
-void Motor2_Backward(void);
-void Motor2_Stop(void);
+static void Motor2_Forward(void);
+static void Motor2_Backward(void);
+static void Motor2_Stop(void);
 
-void Motor3_Forward(void);
-void Motor3_Backward(void);
-void Motor3_Stop(void);
+static void Motor3_Forward(void);
+static void Motor3_Backward(void);
+static void Motor3_Stop(void);
 
-void Motor4_Forward(void);
-void Motor4_Backward(void);
-void Motor4_Stop(void);
+static void Motor4_Forward(void);
+static void Motor4_Backward(void);
+static void Motor4_Stop(void);
 
 #endif /* DOUBLE_H_BRIDGES_H_ */

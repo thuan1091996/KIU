@@ -102,33 +102,31 @@ void Motor1_UpdateSpeed(int8_t i8_M1Duty)
 }
 
 
-void Motor1_Forward(void)
+static void Motor1_Forward(void)
 {
-    uint8_t temp=0;
-    temp=BRIDGEH_GPIO_DATA;
-    temp&= MOTOR1;                              //Get the current direction of Motor1
-    if(temp!=MOTOR1_FORWARD)                    //If it is not running forward then turn off the motor to protect then running forward
+    uint8_t cur_dir = BRIDGEH_GPIO_DATA & MOTOR1;   //Get the current direction of Motor1
+    if(cur_dir != MOTOR1_FORWARD)
     {
-        BRIDGEH_GPIO_DATA&=~MOTOR1;             //Stop motor
-        SysCtlDelay(SysCtlClockGet()/3000);     //Delay 1ms
-        BRIDGEH_GPIO_DATA|=MOTOR1_FORWARD;      //Run forward
+        /* //If it is not running forward then turn off the motor to protect then running forward */
+        BRIDGEH_GPIO_DATA &= ~MOTOR1;               //Stop the motor
+        SysCtlDelay(SysCtlClockGet()/3000);         //Delay 1ms
+        BRIDGEH_GPIO_DATA |= MOTOR1_FORWARD;        //Run Forward
     }
 }
 
-void Motor1_Backward(void)
+static void Motor1_Backward(void)
 {
-    uint8_t temp=0;
-    temp=BRIDGEH_GPIO_DATA;
-    temp&= MOTOR1;                              //Get the current direction of Motor1
-    if(temp!=MOTOR1_BACKWARD)                   //If it is not running backward then turn off the motor to protect then running backward
+    uint8_t cur_dir = BRIDGEH_GPIO_DATA & MOTOR1;   //Get the current direction of Motor0
+    if(cur_dir != MOTOR1_BACKWARD)
     {
-        BRIDGEH_GPIO_DATA&=~MOTOR1;             //Stop the motor
-        SysCtlDelay(SysCtlClockGet()/3000);     //Delay 1ms
-        BRIDGEH_GPIO_DATA|=MOTOR1_BACKWARD;     //Run backward
+        /* If it is not running backward then turn off the motor to protect then running backward */
+        BRIDGEH_GPIO_DATA &= ~MOTOR1;               //Stop the motor
+        SysCtlDelay(SysCtlClockGet()/3000);         //Delay 1ms
+        BRIDGEH_GPIO_DATA |= MOTOR1_BACKWARD;       //Run backward
     }
 }
 
-void Motor1_Stop(void)
+static void Motor1_Stop(void)
 {
     BRIDGEH_GPIO_DATA&=~MOTOR1;
 }
@@ -162,33 +160,31 @@ void Motor0_UpdateSpeed(int8_t i8_M0Duty)
     }
 }
 
-void Motor0_Forward(void)
+static void Motor0_Forward(void)
 {
-    uint8_t     temp=0;
-    temp=BRIDGEH_GPIO_DATA;
-    temp&= MOTOR0;                              //Get the current direction of Motor0
-    if(temp!=MOTOR0_FORWARD)                    //If it is not running forward then turn off the motor to protect then running forward
+    uint8_t cur_dir = BRIDGEH_GPIO_DATA & MOTOR0;   //Get the current direction of Motor0
+    if(cur_dir != MOTOR0_FORWARD)
     {
-        BRIDGEH_GPIO_DATA&=~MOTOR0;             //Stop the motor
-        SysCtlDelay(SysCtlClockGet()/3000);     //Delay 1ms
-        BRIDGEH_GPIO_DATA|=MOTOR0_FORWARD;      //Run Forward
+        /* If it is not running forward then turn off the motor to protect then running forward */
+        BRIDGEH_GPIO_DATA &= ~MOTOR0;               //Stop the motor
+        SysCtlDelay(SysCtlClockGet()/3000);         //Delay 1ms
+        BRIDGEH_GPIO_DATA |= MOTOR0_FORWARD;        //Run Forward
     }
 }
 
-void Motor0_Backward(void)
+static void Motor0_Backward(void)
 {
-    uint8_t     temp=0;
-    temp=BRIDGEH_GPIO_DATA;
-    temp&= MOTOR0;                              //Get the current direction of Motor0
-    if(temp!=MOTOR0_BACKWARD)                   //If it is not running backward then turn off the motor to protect then running backward
+    uint8_t cur_dir = BRIDGEH_GPIO_DATA & MOTOR0;   //Get the current direction of Motor0
+    if(cur_dir != MOTOR0_BACKWARD)
     {
-        BRIDGEH_GPIO_DATA&=~MOTOR0;                     //Stop the motor
-        SysCtlDelay(SysCtlClockGet()/3000);     //Delay 1ms
-        BRIDGEH_GPIO_DATA|=MOTOR0_BACKWARD;             //Run backward
+        /* If it is not running backward then turn off the motor to protect then running backward */
+        BRIDGEH_GPIO_DATA &= ~MOTOR0;               //Stop the motor
+        SysCtlDelay(SysCtlClockGet()/3000);         //Delay 1ms
+        BRIDGEH_GPIO_DATA |= MOTOR0_BACKWARD;       //Run backward
     }
 }
 
-void Motor0_Stop(void)
+static void Motor0_Stop(void)
 {
     BRIDGEH_GPIO_DATA&=~MOTOR0;
 }

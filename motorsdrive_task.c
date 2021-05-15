@@ -96,8 +96,10 @@ DriveMotorsTaskInit(void)
                           NULL);
     if(status != pdPASS)
     {
+        UARTprintf("Bridge-H initialization failed \n");
         while(1) {} //FIXME
     }
+    UARTprintf("Bridge-H initialization sucessfully \n");
     return status;  /* Success */
 
 }
