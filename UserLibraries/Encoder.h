@@ -24,13 +24,17 @@ QEI1    |  PC5  |  PC6
 #ifndef USERLIBRARIES_ENCODER_H_
 #define USERLIBRARIES_ENCODER_H_
 
+/******************************************************************************
+* Includes
+*******************************************************************************/
+#include "Userlibs.h"
 
 /******************************************************************************
 * Configuration Constants
 *******************************************************************************/
-#define ENCODER0_RESOLUTION         1324
-#define ENCODER1_RESOLUTION         1324
-#define SPEED_SAMPLE_PERIOD         0.1
+#define ENCODER0_RESOLUTION         1320
+#define ENCODER1_RESOLUTION         1320
+#define QEI_INT_FREQ                10
 #define QEI0_PRIORITY               2
 #define QEI1_PRIORITY               2
 

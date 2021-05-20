@@ -19,48 +19,24 @@ QEI1    |  PC5  |  PC6
 /******************************************************************************
 * Includes
 *******************************************************************************/
-#include "Userlibs.h"
 #include "Encoder.h"
 #include "UART.h"
 
 /******************************************************************************
+* Defines
+*******************************************************************************/
+#define MOTOR_MAX_SPEED         330
+
+/******************************************************************************
 * Module Variable Definitions
 *******************************************************************************/
-int32_t i32Data_Velocity0=0;                    //Data Velocity Motor0 Semaphore
-int32_t i32Data_Velocity1=0;                    //Data Velocity Motor1 Semaphore
-extern uint8_t ui8Flag_FreshVel0;
-extern uint8_t ui8Flag_FreshVel1;
+static uint8_t ui8Flag_NewVel0Data;
+static uint8_t ui8Flag_NewVel1Data;
+
+
 /******************************************************************************
 * Function Definitions
 *******************************************************************************/
-
-// *******************************************************************************
-//
-//! QEI0 Timer Expire INT Handler
-//! When QEI's timer expires, Signal semaphore to indicate there is new speed data
-//
-//********************************************************************************
-void QEI0_INTHandler(void)
-{
-    QEIIntClear(QEI0_BASE, QEI_INTTIMER);       //acknowledge interrupt
-    ui8Flag_FreshVel0=1;
-//        OS_Signal(&i32Data_Velocity0);
-};
-
-// *******************************************************************************
-//
-//! QEI1 Timer Expire INT Handler
-//! When QEI's timer expires, Signal semaphore to indicate there is new speed data
-//
-//********************************************************************************
-void QEI1_INTHandler(void)
-{
-    QEIIntClear(QEI1_BASE, QEI_INTTIMER);       //acknowledge interrupt
-    ui8Flag_FreshVel1=1;
-//        OS_Signal(&i32Data_Velocity1);
-};
-
-
 
 // *****************************************************************************
 //
@@ -68,8 +44,6 @@ void QEI1_INTHandler(void)
 //! QEI Quadrature mode, no swap, no index, no Filter
 //! QEI Velocity Initialization with Timer clock = System clock
 //! Setting for QEI Timer Expire interrupt to interrupt every period
-//! \param:  ui32Resolution0     :Rising/falling edges per motor revolution
-//! \param:  ui32Resolution1     :Rising/falling edges per motor revolution
 //! \param:  ui8Priority0        :QEI Int handler priority
 //! \param:  ui8Priority1        :QEI Int handler priority
 //
@@ -108,13 +82,11 @@ void QEI_Init(uint8_t ui8Priority0, uint8_t ui8Priority1)
     QEIVelocityDisable(QEI0_BASE);
     QEIVelocityDisable(QEI1_BASE);
 
-    // instruction below *100 because in case Sample Time >1s, QEIMAXPOS reg may not overload because there more than 1324 pulses /sec
-    // no need cuz QEI_COUNT_R and QEI_MAXPOS work independently
-    QEIConfigure(QEI0_BASE, QEI_CONFIG_CAPTURE_A_B|QEI_CONFIG_NO_RESET|QEI_CONFIG_QUADRATURE|QEI_CONFIG_NO_SWAP, ENCODER0_RESOLUTION-1);
-    QEIConfigure(QEI1_BASE, QEI_CONFIG_CAPTURE_A_B|QEI_CONFIG_NO_RESET|QEI_CONFIG_QUADRATURE|QEI_CONFIG_NO_SWAP, ENCODER1_RESOLUTION-1);
+    QEIConfigure(QEI0_BASE, QEI_CONFIG_CAPTURE_A_B|QEI_CONFIG_NO_RESET|QEI_CONFIG_QUADRATURE|QEI_CONFIG_NO_SWAP, 0);
+    QEIConfigure(QEI1_BASE, QEI_CONFIG_CAPTURE_A_B|QEI_CONFIG_NO_RESET|QEI_CONFIG_QUADRATURE|QEI_CONFIG_NO_SWAP, 0);
 
-    QEIVelocityConfigure(QEI0_BASE, QEI_VELDIV_1, (SysCtlClockGet()*SPEED_SAMPLE_PERIOD));
-    QEIVelocityConfigure(QEI1_BASE, QEI_VELDIV_1, (SysCtlClockGet()*SPEED_SAMPLE_PERIOD));
+    QEIVelocityConfigure(QEI0_BASE, QEI_VELDIV_1, (SysCtlClockGet() / QEI_INT_FREQ));
+    QEIVelocityConfigure(QEI1_BASE, QEI_VELDIV_1, (SysCtlClockGet() / QEI_INT_FREQ));
 
     //Interrupt configure
     QEIIntRegister(QEI0_BASE, QEI0_INTHandler);
@@ -123,15 +95,17 @@ void QEI_Init(uint8_t ui8Priority0, uint8_t ui8Priority1)
     IntPrioritySet(INT_QEI0_TM4C123, ui8Priority0);
     IntPrioritySet(INT_QEI1_TM4C123, ui8Priority1);
 
-    QEIIntEnable(QEI0_BASE, QEI_INTTIMER);  //Velocity timer expires interrupt enable
-    QEIIntEnable(QEI1_BASE, QEI_INTTIMER);  //Velocity timer expires interrupt enable
-
     QEIPositionSet(QEI0_BASE, 0);       //Reset counter
     QEIPositionSet(QEI1_BASE, 0);
 
-//    Filter
-//    QEIFilterConfigure(QEI0_BASE, QEI_FILTCNT_7);
-//    QEIFilterEnable(QEI0_BASE);
+    QEIIntEnable(QEI0_BASE, QEI_INTTIMER);  //Velocity timer expires interrupt enable
+    QEIIntEnable(QEI1_BASE, QEI_INTTIMER);  //Velocity timer expires interrupt enable
+
+    //Filter
+    QEIFilterConfigure(QEI0_BASE, QEI_FILTCNT_10);
+    QEIFilterConfigure(QEI1_BASE, QEI_FILTCNT_10);
+    QEIFilterEnable(QEI0_BASE);
+    QEIFilterEnable(QEI1_BASE);
 
     QEIVelocityEnable(QEI0_BASE);
     QEIVelocityEnable(QEI1_BASE);
@@ -139,8 +113,6 @@ void QEI_Init(uint8_t ui8Priority0, uint8_t ui8Priority1)
     QEIEnable(QEI0_BASE);
     QEIEnable(QEI1_BASE);
 };
-
-
 
 
 /* -----------Update_Position ---------------
@@ -175,7 +147,6 @@ void Update_Position1(float *Pt_Pos1)
     }
 };
 
-
 // *****************************************************************************
 //
 //! Update Velocity of encoder 0
@@ -183,9 +154,29 @@ void Update_Position1(float *Pt_Pos1)
 //******************************************************************************
 void Update_Velocity0(int16_t *Pt_Vel0)
 {
-    float speed_f = (QEIVelocityGet(QEI0_BASE) * 60.0) / (1.0 * ENCODER0_RESOLUTION * SPEED_SAMPLE_PERIOD);
-    speed_f *= QEIDirectionGet(QEI1_BASE);
-    *Pt_Vel0= (int16_t)(speed_f);
+    if (ui8Flag_NewVel0Data == 1)
+    {
+        int16_t prev_speed  = *Pt_Vel0;
+        int16_t delta_speed;
+        int32_t cur_speed   = (QEIVelocityGet(QEI0_BASE) * 60) / 132 ; /* RPM = (pulses * int_freq * 60) / resolution  */
+        cur_speed *= QEIDirectionGet(QEI0_BASE);
+
+        if (cur_speed > prev_speed)
+        {
+            delta_speed = cur_speed - prev_speed;
+        }
+        else
+        {
+            delta_speed = prev_speed - cur_speed;
+        }
+
+        /* Filter if changes way too much */
+        if(delta_speed <= MOTOR_MAX_SPEED)
+        {
+            *Pt_Vel0 = (int16_t)cur_speed;
+        }
+        ui8Flag_NewVel0Data = 0;
+    }
 };
 
 // *****************************************************************************
@@ -195,9 +186,49 @@ void Update_Velocity0(int16_t *Pt_Vel0)
 //******************************************************************************
 void Update_Velocity1(int16_t *Pt_Vel1)
 {
-    float speed_f = (QEIVelocityGet(QEI1_BASE) * 60.0)/(1.0 * ENCODER1_RESOLUTION * SPEED_SAMPLE_PERIOD);
-    speed_f *= QEIDirectionGet(QEI1_BASE);;
-    *Pt_Vel1= (int16_t)(speed_f);
+    if (ui8Flag_NewVel1Data == 1)
+    {
+        int16_t prev_speed  = *Pt_Vel1;
+        int16_t delta_speed;
+        int32_t cur_speed   = (QEIVelocityGet(QEI1_BASE) * 60) / 132; /* RPM = (pulses * int_freq * 60) / resolution  */
+        cur_speed *= QEIDirectionGet(QEI1_BASE);
+        if (cur_speed > prev_speed)
+        {
+            delta_speed = cur_speed - prev_speed;
+        }
+        else
+        {
+            delta_speed = prev_speed - cur_speed;
+        }
+        /* Filter if changes way too much */
+        if(delta_speed <= MOTOR_MAX_SPEED)
+        {
+            *Pt_Vel1 = (int16_t)cur_speed;
+        }
+        ui8Flag_NewVel1Data = 0;
+    }
 };
+
+
+// *******************************************************************************
+//
+//! QEI1 Timer Expire INT Handler
+//! When QEI's timer expires, Signal semaphore to indicate there is new speed data
+//
+//********************************************************************************
+
+void QEI0_INTHandler(void)
+{
+    QEIIntClear(QEI0_BASE, QEI_INTTIMER);       //acknowledge interrupt
+    ui8Flag_NewVel0Data=1;
+};
+
+
+void QEI1_INTHandler(void)
+{
+    QEIIntClear(QEI1_BASE, QEI_INTTIMER);       //acknowledge interrupt
+    ui8Flag_NewVel1Data=1;
+};
+
 
 #endif /* USERLIBRARIES_ENCODER_C_ */
