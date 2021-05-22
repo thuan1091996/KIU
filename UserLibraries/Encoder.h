@@ -32,11 +32,19 @@ QEI1    |  PC5  |  PC6
 /******************************************************************************
 * Configuration Constants
 *******************************************************************************/
+#define MOTOR0_MAX_SPEED            330
+#define MOTOR1_MAX_SPEED            330
 #define ENCODER0_RESOLUTION         1320
 #define ENCODER1_RESOLUTION         1320
-#define QEI_INT_FREQ                10
+#define QEI0_INT_FREQ               10
+#define QEI1_INT_FREQ               10
 #define QEI0_PRIORITY               2
 #define QEI1_PRIORITY               2
+#if (QEI0_INT_FREQ != 10) || (QEI1_INT_FREQ != 10)
+    #error "Change the velocity equation used to optimize calculation time inside Update_Velocityx()"
+#else
+    #define CAL_OPTIMIZEED_WITH_FIXED_FREQ
+#endif
 
 
 /******************************************************************************
@@ -44,7 +52,8 @@ QEI1    |  PC5  |  PC6
 *******************************************************************************/
 void QEI0_INTHandler(void);
 void QEI1_INTHandler(void);
-void QEI_Init(uint8_t ui8Priority0, uint8_t ui8Priority1);
+void QEI0_Init(uint8_t ui8Priority0);
+void QEI1_Init(uint8_t ui8Priority1);
 void Update_Position0(float *Pt_Pos0);
 void Update_Position1(float *Pt_Pos1);
 void Update_Velocity0(int16_t *Pt_Vel0);

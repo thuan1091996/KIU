@@ -20,19 +20,15 @@ QEI1    |  PC5  |  PC6
 * Includes
 *******************************************************************************/
 #include "Encoder.h"
-#include "UART.h"
 
 /******************************************************************************
 * Defines
 *******************************************************************************/
-#define MOTOR_MAX_SPEED         330
+
 
 /******************************************************************************
 * Module Variable Definitions
 *******************************************************************************/
-static uint8_t ui8Flag_NewVel0Data;
-static uint8_t ui8Flag_NewVel1Data;
-
 
 /******************************************************************************
 * Function Definitions
@@ -45,73 +41,83 @@ static uint8_t ui8Flag_NewVel1Data;
 //! QEI Velocity Initialization with Timer clock = System clock
 //! Setting for QEI Timer Expire interrupt to interrupt every period
 //! \param:  ui8Priority0        :QEI Int handler priority
-//! \param:  ui8Priority1        :QEI Int handler priority
 //
 //******************************************************************************
-void QEI_Init(uint8_t ui8Priority0, uint8_t ui8Priority1)
+void QEI0_Init(uint8_t ui8Priority0)
 {
     //Enable peripherals
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_QEI0);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_QEI1);
-    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC));
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOD));
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_QEI0));
-    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_QEI1));
-
     //Unlock PD7
     HWREG(GPIO_PORTD_BASE+GPIO_O_LOCK) = GPIO_LOCK_KEY;
     HWREG(GPIO_PORTD_BASE+GPIO_O_CR) |= GPIO_PIN_7;
 
     //GPIO Configure for QEI
-    GPIOPinTypeQEI(GPIO_PORTC_BASE, GPIO_PIN_5);
-    GPIOPinTypeQEI(GPIO_PORTC_BASE, GPIO_PIN_6);
     GPIOPinTypeQEI(GPIO_PORTD_BASE, GPIO_PIN_6);
     GPIOPinTypeQEI(GPIO_PORTD_BASE, GPIO_PIN_7);
-    GPIOPinConfigure(GPIO_PC5_PHA1);
-    GPIOPinConfigure(GPIO_PC6_PHB1);
     GPIOPinConfigure(GPIO_PD6_PHA0);
     GPIOPinConfigure(GPIO_PD7_PHB0);
 
     //QEI Configure
-    QEIDisable(QEI0_BASE);  //First disable  to configure
-    QEIDisable(QEI1_BASE);
+    QEIDisable(QEI0_BASE);
     QEIIntDisable(QEI0_BASE, (QEI_INTERROR | QEI_INTDIR | QEI_INTTIMER | QEI_INTINDEX));
-    QEIIntDisable(QEI1_BASE, (QEI_INTERROR | QEI_INTDIR | QEI_INTTIMER | QEI_INTINDEX));
     QEIVelocityDisable(QEI0_BASE);
-    QEIVelocityDisable(QEI1_BASE);
-
     QEIConfigure(QEI0_BASE, QEI_CONFIG_CAPTURE_A_B|QEI_CONFIG_NO_RESET|QEI_CONFIG_QUADRATURE|QEI_CONFIG_NO_SWAP, 0);
-    QEIConfigure(QEI1_BASE, QEI_CONFIG_CAPTURE_A_B|QEI_CONFIG_NO_RESET|QEI_CONFIG_QUADRATURE|QEI_CONFIG_NO_SWAP, 0);
-
-    QEIVelocityConfigure(QEI0_BASE, QEI_VELDIV_1, (SysCtlClockGet() / QEI_INT_FREQ));
-    QEIVelocityConfigure(QEI1_BASE, QEI_VELDIV_1, (SysCtlClockGet() / QEI_INT_FREQ));
-
-    //Interrupt configure
-    QEIIntRegister(QEI0_BASE, QEI0_INTHandler);
-    QEIIntRegister(QEI1_BASE, QEI1_INTHandler);
-
-    IntPrioritySet(INT_QEI0_TM4C123, ui8Priority0);
-    IntPrioritySet(INT_QEI1_TM4C123, ui8Priority1);
-
-    QEIPositionSet(QEI0_BASE, 0);       //Reset counter
-    QEIPositionSet(QEI1_BASE, 0);
-
-    QEIIntEnable(QEI0_BASE, QEI_INTTIMER);  //Velocity timer expires interrupt enable
-    QEIIntEnable(QEI1_BASE, QEI_INTTIMER);  //Velocity timer expires interrupt enable
+    QEIVelocityConfigure(QEI0_BASE, QEI_VELDIV_1, (SysCtlClockGet() / QEI0_INT_FREQ));
 
     //Filter
     QEIFilterConfigure(QEI0_BASE, QEI_FILTCNT_10);
-    QEIFilterConfigure(QEI1_BASE, QEI_FILTCNT_10);
     QEIFilterEnable(QEI0_BASE);
+
+    //Interrupt configure
+    QEIIntRegister(QEI0_BASE, QEI0_INTHandler);
+    IntPrioritySet(INT_QEI0_TM4C123, ui8Priority0);
+    QEIPositionSet(QEI0_BASE, 0);       //Reset counter
+
+    //Enable QEI
+    QEIVelocityEnable(QEI0_BASE);
+    QEIEnable(QEI0_BASE);
+    QEIIntEnable(QEI0_BASE, QEI_INTTIMER);  //Velocity timer expires interrupt enable
+
+};
+
+void QEI1_Init(uint8_t ui8Priority1)
+{
+    //Enable peripherals
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_QEI1);
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC));
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_QEI1));
+
+    //GPIO Configure for QEI
+    GPIOPinTypeQEI(GPIO_PORTC_BASE, GPIO_PIN_5);
+    GPIOPinTypeQEI(GPIO_PORTC_BASE, GPIO_PIN_6);
+    GPIOPinConfigure(GPIO_PC5_PHA1);
+    GPIOPinConfigure(GPIO_PC6_PHB1);
+
+    //QEI Configure
+    QEIDisable(QEI1_BASE);
+    QEIIntDisable(QEI1_BASE, (QEI_INTERROR | QEI_INTDIR | QEI_INTTIMER | QEI_INTINDEX));
+    QEIVelocityDisable(QEI1_BASE);
+    QEIConfigure(QEI1_BASE, QEI_CONFIG_CAPTURE_A_B|QEI_CONFIG_NO_RESET|QEI_CONFIG_QUADRATURE|QEI_CONFIG_NO_SWAP, 0);
+    QEIVelocityConfigure(QEI1_BASE, QEI_VELDIV_1, (SysCtlClockGet() / QEI1_INT_FREQ));
+
+    //Filter
+    QEIFilterConfigure(QEI1_BASE, QEI_FILTCNT_10);
     QEIFilterEnable(QEI1_BASE);
 
-    QEIVelocityEnable(QEI0_BASE);
-    QEIVelocityEnable(QEI1_BASE);
+    //Interrupt configure
+    QEIIntRegister(QEI1_BASE, QEI1_INTHandler);
+    IntPrioritySet(INT_QEI1_TM4C123, ui8Priority1);
+    QEIPositionSet(QEI1_BASE, 0);
 
-    QEIEnable(QEI0_BASE);
+    //Enable QEI
     QEIEnable(QEI1_BASE);
+    QEIVelocityEnable(QEI1_BASE);
+    QEIIntEnable(QEI1_BASE, QEI_INTTIMER);  //Velocity timer expires interrupt enable
+
 };
 
 
@@ -154,28 +160,29 @@ void Update_Position1(float *Pt_Pos1)
 //******************************************************************************
 void Update_Velocity0(int16_t *Pt_Vel0)
 {
-    if (ui8Flag_NewVel0Data == 1)
+    int16_t prev_speed  = *Pt_Vel0;
+    int16_t delta_speed;
+#ifdef CAL_OPTIMIZEED_WITH_FIXED_FREQ
+    int32_t cur_speed   = (QEIVelocityGet(QEI0_BASE) * 60) / 132 ; /* RPM = (pulses * int_freq * 60) / resolution  */
+#else
+    int32_t cur_speed   = (QEIVelocityGet(QEI0_BASE) * QEI0_INT_FREQ * 60) / ENCODER0_RESOLUTION ;
+#endif  /* End of ifdef CAL_OPTIMIZEED_WITH_FIXED_FREQ */
+
+    cur_speed *= QEIDirectionGet(QEI0_BASE);
+
+    if (cur_speed > prev_speed)
     {
-        int16_t prev_speed  = *Pt_Vel0;
-        int16_t delta_speed;
-        int32_t cur_speed   = (QEIVelocityGet(QEI0_BASE) * 60) / 132 ; /* RPM = (pulses * int_freq * 60) / resolution  */
-        cur_speed *= QEIDirectionGet(QEI0_BASE);
+        delta_speed = cur_speed - prev_speed;
+    }
+    else
+    {
+        delta_speed = prev_speed - cur_speed;
+    }
 
-        if (cur_speed > prev_speed)
-        {
-            delta_speed = cur_speed - prev_speed;
-        }
-        else
-        {
-            delta_speed = prev_speed - cur_speed;
-        }
-
-        /* Filter if changes way too much */
-        if(delta_speed <= MOTOR_MAX_SPEED)
-        {
-            *Pt_Vel0 = (int16_t)cur_speed;
-        }
-        ui8Flag_NewVel0Data = 0;
+    /* Filter if changes way too much */
+    if(delta_speed <= MOTOR0_MAX_SPEED)
+    {
+        *Pt_Vel0 = (int16_t)cur_speed;
     }
 };
 
@@ -186,48 +193,45 @@ void Update_Velocity0(int16_t *Pt_Vel0)
 //******************************************************************************
 void Update_Velocity1(int16_t *Pt_Vel1)
 {
-    if (ui8Flag_NewVel1Data == 1)
+    int16_t prev_speed  = *Pt_Vel1;
+    int16_t delta_speed;
+#ifdef CAL_OPTIMIZEED_WITH_FIXED_FREQ
+    int32_t cur_speed   = (QEIVelocityGet(QEI1_BASE) * 60) / 132 ; /* RPM = (pulses * int_freq * 60) / resolution  */
+#else
+    int32_t cur_speed   = (QEIVelocityGet(QEI1_BASE) * QEI1_INT_FREQ * 60) / ENCODER1_RESOLUTION ;
+#endif  /* End of ifdef CAL_OPTIMIZEED_WITH_FIXED_FREQ */
+    cur_speed *= QEIDirectionGet(QEI1_BASE);
+    if (cur_speed > prev_speed)
     {
-        int16_t prev_speed  = *Pt_Vel1;
-        int16_t delta_speed;
-        int32_t cur_speed   = (QEIVelocityGet(QEI1_BASE) * 60) / 132; /* RPM = (pulses * int_freq * 60) / resolution  */
-        cur_speed *= QEIDirectionGet(QEI1_BASE);
-        if (cur_speed > prev_speed)
-        {
-            delta_speed = cur_speed - prev_speed;
-        }
-        else
-        {
-            delta_speed = prev_speed - cur_speed;
-        }
-        /* Filter if changes way too much */
-        if(delta_speed <= MOTOR_MAX_SPEED)
-        {
-            *Pt_Vel1 = (int16_t)cur_speed;
-        }
-        ui8Flag_NewVel1Data = 0;
+        delta_speed = cur_speed - prev_speed;
+    }
+    else
+    {
+        delta_speed = prev_speed - cur_speed;
+    }
+    /* Filter if changes way too much */
+    if(delta_speed <= MOTOR1_MAX_SPEED)
+    {
+        *Pt_Vel1 = (int16_t)cur_speed;
     }
 };
 
 
 // *******************************************************************************
 //
-//! QEI1 Timer Expire INT Handler
-//! When QEI's timer expires, Signal semaphore to indicate there is new speed data
+//! QEIx Timer Expire INT Handler
 //
 //********************************************************************************
 
-void QEI0_INTHandler(void)
+__attribute__((__weak__)) void QEI0_INTHandler(void)
 {
     QEIIntClear(QEI0_BASE, QEI_INTTIMER);       //acknowledge interrupt
-    ui8Flag_NewVel0Data=1;
 };
 
 
-void QEI1_INTHandler(void)
+__attribute__((__weak__)) void QEI1_INTHandler(void)
 {
     QEIIntClear(QEI1_BASE, QEI_INTTIMER);       //acknowledge interrupt
-    ui8Flag_NewVel1Data=1;
 };
 
 
