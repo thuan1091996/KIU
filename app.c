@@ -1,27 +1,20 @@
-//*****************************************************************************
-//
-// freertos_demo.c - Simple FreeRTOS example.
-//
-// Copyright (c) 2012-2017 Texas Instruments Incorporated.  All rights reserved.
-// Software License Agreement
-// 
-// Texas Instruments (TI) is supplying this software for use solely and
-// exclusively on TI's microcontroller products. The software is owned by
-// TI and/or its suppliers, and is protected under applicable copyright
-// laws. You may not combine this software with "viral" open-source
-// software in order to form a larger program.
-// 
-// THIS SOFTWARE IS PROVIDED "AS IS" AND WITH ALL FAULTS.
-// NO WARRANTIES, WHETHER EXPRESS, IMPLIED OR STATUTORY, INCLUDING, BUT
-// NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE APPLY TO THIS SOFTWARE. TI SHALL NOT, UNDER ANY
-// CIRCUMSTANCES, BE LIABLE FOR SPECIAL, INCIDENTAL, OR CONSEQUENTIAL
-// DAMAGES, FOR ANY REASON WHATSOEVER.
-// 
-// This is part of revision 2.1.4.178 of the EK-TM4C123GXL Firmware Package.
-//
-//*****************************************************************************
+/****************************************************************************
+* Title                 :   Mobile Robot application header
+* Filename              :   app.c
+* Author                :   ItachiThuan
+* Origin Date           :   May 15, 2021
+* Version               :   1.0.0
+* Target                :   TM4C123 with CCS IDE
+*****************************************************************************/
 
+/*************** MODULE REVISION LOG**************************************
+*    Date           + Software Version  +  Initials Description
+*  May 15, 2021       | v1.0.0            |  Interface Created.
+*****************************************************************************/
+
+/******************************************************************************
+* Includes
+*******************************************************************************/
 #include <stdbool.h>
 #include <stdint.h>
 #include "inc/hw_memmap.h"
@@ -38,64 +31,331 @@
 #include "task.h"
 #include "queue.h"
 #include "semphr.h"
-#include "motorsdrive_task.h"
-//*****************************************************************************
-//
-//! \addtogroup example_list
-//! <h1>FreeRTOS Example (freertos_demo)</h1>
-//!
-//! This application demonstrates the use of FreeRTOS on Launchpad.
-//!
-//! The application blinks the user-selected LED at a user-selected frequency.
-//! To select the LED press the left button and to select the frequency press
-//! the right button.  The UART outputs the application status at 115,200 baud,
-//! 8-n-1 mode.
-//!
-//! This application utilizes FreeRTOS to perform the tasks in a concurrent
-//! fashion.  The following tasks are created:
-//!
-//! - An LED task, which blinks the user-selected on-board LED at a
-//!   user-selected rate (changed via the buttons).
-//!
-//! - A Switch task, which monitors the buttons pressed and passes the
-//!   information to LED task.
-//!
-//! In addition to the tasks, this application also uses the following FreeRTOS
-//! resources:
-//!
-//! - A Queue to enable information transfer between tasks.
-//!
-//! - A Semaphore to guard the resource, UART, from access by multiple tasks at
-//!   the same time.
-//!
-//! - A non-blocking FreeRTOS Delay to put the tasks in blocked state when they
-//!   have nothing to do.
-//!
-//! For additional details on FreeRTOS, refer to the FreeRTOS web page at:
-//! http://www.freertos.org/
-//
-//*****************************************************************************
+#include "app.h"
+
+#include "UserLibraries/BridgeH.h"
+#include "UserLibraries/Encoder.h"
+/******************************************************************************
+* Module pre-processor
+*******************************************************************************/
+#define QEI0_ISR_PRIORITY           5
+#define QEI1_ISR_PRIORITY           5
 
 
-//*****************************************************************************
-//
-// The mutex that protects concurrent access of UART from multiple tasks.
-//
-//*****************************************************************************
-xSemaphoreHandle g_pUARTSemaphore;
+/******************************************************************************
+* Feature defines
+*******************************************************************************/
+#define TEST_TASK_MEM               0   //TODO: Reset to 0 when release
+#define TEST_ENCODER                0   //TODO: Reset to 0 when release
+/******************************************************************************
+* Task defines
+******************************************************************************/
+// Task priorities: Higher -> More important
+#define M0SPEEDUPDATE_PRIORITY      tskIDLE_PRIORITY + 7
+#define M1SPEEDUPDATE_PRIORITY      tskIDLE_PRIORITY + 7
+#define MOTORDRIVER_PRIORITY        tskIDLE_PRIORITY + 5
 
-//*****************************************************************************
-//
-// The error routine that is called if the driver library encounters an error.
-//
-//*****************************************************************************
+// Task stack size: In words (4-bytes)
+#define MOTORDRIVER_STACK_DEPTH     64
+#if TEST_ENCODER
+#define M0SPEEDUPDATE_STACK_DEPTH   100
+#define M1SPEEDUPDATE_STACK_DEPTH   100
+#else
+#define M0SPEEDUPDATE_STACK_DEPTH   50
+#define M1SPEEDUPDATE_STACK_DEPTH   50
+#endif  /* End of TEST_ENCODER */
+
+#define TASK_TOTAL                  3
+
+
+/******************************************************************************
+* Macro
+******************************************************************************/
+/* The error routine that is called if the driver library encounters an error */
 #ifdef DEBUG
 void
 __error__(char *pcFilename, uint32_t ui32Line)
 {
 }
-
 #endif
+/******************************************************************************
+* Module Typedefs
+*******************************************************************************/
+typedef struct
+{
+    TaskFunction_t const TaskCodePtr;           /*< Pointer to the task function */
+    const char * const TaskName;                /*< String task name             */
+    const uint16_t StackDepth;                  /*< Stack depth                  */
+    void * const ParametersPtr;                 /*< Parameter Pointer            */
+    UBaseType_t TaskPriority;                   /*< Task Priority                */
+    TaskHandle_t * const TaskHandle;            /*< Pointer to task handle       */
+}TaskInitParams_t;
+
+
+/******************************************************************************
+* Function Prototypes
+*******************************************************************************/
+static void Task_MotorDriver(void *pvParameters);
+static void Task_M0SpeedUpdate(void *pvParameters);
+static void Task_M1SpeedUpdate(void *pvParameters);
+
+
+
+void ConfigureUART(void);
+/******************************************************************************
+* Module Variable Definitions
+*******************************************************************************/
+TaskHandle_t xHandlerM0SpeedUpdate = NULL;
+TaskHandle_t xHandlerM1SpeedUpdate = NULL;
+TaskHandle_t xHandlerMotorDriver = NULL;
+
+xSemaphoreHandle g_pUARTSemaphore;  /* The mutex that protects concurrent access of UART from multiple tasks */
+
+#if TEST_ENCODER
+int16_t speed_m0=0, speed_m1=0;
+int16_t g_est_speed0=50, g_est_speed1=50;
+int8_t g_set_duty0=40, g_set_duty1=40;
+#endif  /* End of TEST_ENCODER */
+
+
+/* Task configuration table that contains all the parameters necessary to initialize the system tasks. */
+TaskInitParams_t const TaskInitParameters[] =
+{
+ // Pointer Task function,  Task String Name,   The task stack, Parameter Pointer, Task priority  ,     Task Handle
+   {&Task_MotorDriver,      "MotorDriver",    MOTORDRIVER_STACK_DEPTH,    NULL, MOTORDRIVER_PRIORITY,   &xHandlerMotorDriver},
+   {&Task_M0SpeedUpdate,    "M0SpeedUpdater", M0SPEEDUPDATE_STACK_DEPTH,  NULL, M0SPEEDUPDATE_PRIORITY, &xHandlerM0SpeedUpdate},
+   {&Task_M1SpeedUpdate,    "M1SpeedUpdater", M1SPEEDUPDATE_STACK_DEPTH,  NULL, M1SPEEDUPDATE_PRIORITY, &xHandlerM1SpeedUpdate},
+};
+
+
+//*****************************************************************************
+//
+// Initialize FreeRTOS and start the initial set of tasks.
+//
+//*****************************************************************************
+int
+main(void)
+{
+    //
+    // Set the clocking to run at 50 MHz from the PLL.
+    //
+    ROM_SysCtlClockSet(SYSCTL_SYSDIV_2_5| SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
+
+    //
+    // Initialize the UART and configure it for 115,200, 8-N-1 operation.
+    //
+    ConfigureUART();
+
+    //
+    // Print demo introduction.
+    //
+    UARTprintf("Autonomous mobile robot running FreeRTOS demo! \n");
+    UARTprintf("System clock:  %d MHz! \n", (SysCtlClockGet() / 1000000));
+
+    //
+    // Initialization for motors
+    //
+    BridgeH_GPIO_Init();
+    BridgeH_PWM_Init();
+    UARTprintf("Bridge-H was initialized successfully \n");
+
+    //
+    // Initialization of encoder
+    //
+    QEI0_Init(QEI0_ISR_PRIORITY);
+    UARTprintf("Encoder0 driver was initialized successfully \n");
+    QEI1_Init(QEI1_ISR_PRIORITY);
+    UARTprintf("Encoder1 driver was initialized successfully \n");
+
+    //
+    // Create a mutex to guard the UART.
+    //
+    g_pUARTSemaphore = xSemaphoreCreateMutex();
+
+    //
+    // Create the LED task.
+    //
+    if(LEDTaskInit() != 0)
+    {
+        for(;;)
+        {
+        }
+    }
+
+    //
+    // Create the switch task.
+    //
+    if(SwitchTaskInit() != 0)
+    {
+
+        for(;;)
+        {
+        }
+    }
+
+
+    // Loop through the task table and create each task.
+    int TaskCount;
+    for (TaskCount = 0; TaskCount < TASK_TOTAL; ++TaskCount)
+    {
+        BaseType_t xstatus = xTaskCreate(TaskInitParameters[TaskCount].TaskCodePtr,
+                                         TaskInitParameters[TaskCount].TaskName,
+                                         TaskInitParameters[TaskCount].StackDepth,
+                                         TaskInitParameters[TaskCount].ParametersPtr,
+                                         TaskInitParameters[TaskCount].TaskPriority,
+                                         TaskInitParameters[TaskCount].TaskHandle);
+        if(xstatus != pdPASS)
+        {
+            UARTprintf("Creation of %s failed \n", TaskInitParameters[TaskCount].TaskName);
+            for(;;)
+            {
+
+            }
+        }
+    }
+
+    //
+    // Start the scheduler.  This should not return.
+    //
+    vTaskStartScheduler();
+
+    //
+    // In case the scheduler returns for some reason, print an error and loop
+    // forever.
+    //
+
+    for(;;)
+    {
+    }
+}
+
+
+/******************************************************************************
+* Function Definitions
+*******************************************************************************/
+
+
+//*****************************************************************************
+//
+// This task is used to drive the speed of the motors
+//
+//*****************************************************************************
+static void
+Task_MotorDriver(void *pvParameters)
+{
+    for(;;)
+    {
+    /* Pend on semaphore
+         * If the speed of motor0 change
+         *  => Update motor0 speed
+         * else if the speed of motor1 change
+         *  => Update motor 1 speed
+       Post on semaphore*/
+//        UARTprintf("Current motor 0 speed: %d \n", g_set_duty0);
+//        UARTprintf("Current motor 1 speed: %d \n", g_set_duty1);
+        #if TEST_ENCODER
+        Motor0_UpdateSpeed(g_set_duty0);
+        Motor1_UpdateSpeed(g_set_duty1);
+        #endif  /* End of TEST_ENCODER */
+        #if TEST_TASK_MEM
+        UARTprintf("Motordrive Stack left %d \n", uxTaskGetStackHighWaterMark(xHandlerMotorDriver));
+        #endif  /* End of TEST_TASK_MEM */
+        vTaskDelay(10);
+    }
+}
+
+//*****************************************************************************
+//
+// This task is used to get the new speed of the motor
+//
+//*****************************************************************************
+static void
+Task_M0SpeedUpdate(void *pvParameters)
+{
+    for(;;)
+    {
+        #if !TEST_ENCODER
+        int16_t speed_m0;
+        Update_Velocity0(&speed_m0);
+        #else
+        Update_Velocity0(&speed_m0);
+        if (speed_m0 < g_est_speed0)
+        {
+            UARTprintf("Failed: cur_speed0: %d - min_est_speed1: %d \n", speed_m0, g_est_speed0);
+        }
+        #endif  /* End of !TEST_ENCODER */
+        #if TEST_TASK_MEM
+        UARTprintf("Motor 0 Speed update Stack left %d \n", uxTaskGetStackHighWaterMark(xHandlerM0SpeedUpdate));
+        #endif  /* End of TEST_TASK_MEM */
+        ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); /* Clear the notification value and block indefinitely */
+
+    }
+}
+
+static void
+Task_M1SpeedUpdate(void *pvParameters)
+{
+    for(;;)
+    {
+        #if !TEST_ENCODER
+        int16_t speed_m1;
+        Update_Velocity1(&speed_m1);
+        #else
+        Motor1_UpdateSpeed(g_set_duty1);
+        Update_Velocity1(&speed_m1);
+        if (speed_m1 < g_est_speed1)
+        {
+            UARTprintf("Failed: cur_speed1: %d - min_est_speed1: %d \n", speed_m1, g_est_speed1);
+        }
+        #endif  /* End of !TEST_ENCODER */
+        #if TEST_TASK_MEM
+        UARTprintf("Motor 1 Speed update Stack left %d \n", uxTaskGetStackHighWaterMark(xHandlerM1SpeedUpdate));
+        #endif  /* End of TEST_TASK_MEM */
+        ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); /* Clear the notification value and block indefinitely */
+    }
+}
+
+void QEI0_INTHandler(void)
+{
+    QEIIntClear(QEI0_BASE, QEI_INTTIMER);       //acknowledge interrupt
+    BaseType_t xHigherPriorityTaskWoken;
+
+    /* The xHigherPriorityTaskWoken parameter must be initialized to pdFALSE as
+        it will get set to pdTRUE inside the interrupt safe API function if a
+        context switch is required. */
+    xHigherPriorityTaskWoken = pdFALSE;
+
+    /* Send a notification directly to the handler task. */
+    vTaskNotifyGiveFromISR(xHandlerM0SpeedUpdate, &xHigherPriorityTaskWoken );
+
+    /* Pass the xHigherPriorityTaskWoken value into portYIELD_FROM_ISR().  If
+        xHigherPriorityTaskWoken was set to pdTRUE inside vTaskNotifyGiveFromISR()
+        then calling portYIELD_FROM_ISR() will request a context switch.  If
+        xHigherPriorityTaskWoken is still pdFALSE then calling
+        portYIELD_FROM_ISR() will have no effect. */
+    portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
+};
+
+void QEI1_INTHandler(void)
+{
+    QEIIntClear(QEI1_BASE, QEI_INTTIMER);       //acknowledge interrupt
+    BaseType_t xHigherPriorityTaskWoken;
+
+    /* The xHigherPriorityTaskWoken parameter must be initialized to pdFALSE as
+        it will get set to pdTRUE inside the interrupt safe API function if a
+        context switch is required. */
+    xHigherPriorityTaskWoken = pdFALSE;
+
+    /* Send a notification directly to the handler task. */
+    vTaskNotifyGiveFromISR(xHandlerM1SpeedUpdate, &xHigherPriorityTaskWoken );
+
+    /* Pass the xHigherPriorityTaskWoken value into portYIELD_FROM_ISR().  If
+        xHigherPriorityTaskWoken was set to pdTRUE inside vTaskNotifyGiveFromISR()
+        then calling portYIELD_FROM_ISR() will request a context switch.  If
+        xHigherPriorityTaskWoken is still pdFALSE then calling
+        portYIELD_FROM_ISR() will have no effect. */
+    portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
+};
 
 //*****************************************************************************
 //
@@ -110,7 +370,7 @@ vApplicationStackOverflowHook(xTaskHandle *pxTask, char *pcTaskName)
     // on entry to this function, so no processor interrupts will interrupt
     // this loop.
     //
-    while(1)
+    for(;;)
     {
     }
 }
@@ -151,82 +411,3 @@ ConfigureUART(void)
     UARTStdioConfig(0, 115200, 16000000);
 }
 
-//*****************************************************************************
-//
-// Initialize FreeRTOS and start the initial set of tasks.
-//
-//*****************************************************************************
-int
-main(void)
-{
-    //
-    // Set the clocking to run at 50 MHz from the PLL.
-    //
-    ROM_SysCtlClockSet(SYSCTL_SYSDIV_4 | SYSCTL_USE_PLL | SYSCTL_XTAL_16MHZ |
-                       SYSCTL_OSC_MAIN);
-
-    //
-    // Initialize the UART and configure it for 115,200, 8-N-1 operation.
-    //
-    ConfigureUART();
-
-    //
-    // Print demo introduction.
-    //
-    UARTprintf("\n\nWelcome to the EK-TM4C123GXL FreeRTOS Demo!\n");
-
-    //
-    // Create a mutex to guard the UART.
-    //
-    g_pUARTSemaphore = xSemaphoreCreateMutex();
-
-    //
-    // Create the LED task.
-    //
-    if(LEDTaskInit() != 0)
-    {
-        while(1)
-        {
-        }
-    }
-
-    //
-    // Create the switch task.
-    //
-    if(SwitchTaskInit() != 0)
-    {
-
-        while(1)
-        {
-        }
-    }
-
-    //*****************************************************************************
-    //
-    // Create Motor drives task
-    //
-    //*****************************************************************************
-
-    if (DriveMotorsTaskInit() != pdPASS)
-    {
-        while(1)
-        {
-            //FIXME:
-        }
-
-    }
-
-    //
-    // Start the scheduler.  This should not return.
-    //
-    vTaskStartScheduler();
-
-    //
-    // In case the scheduler returns for some reason, print an error and loop
-    // forever.
-    //
-
-    while(1)
-    {
-    }
-}
