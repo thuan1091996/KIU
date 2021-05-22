@@ -45,6 +45,13 @@
 /******************************************************************************
 * Feature defines
 *******************************************************************************/
+#define FW_MAJORID                  0   //TODO: Update each release
+#define FW_MINORID                  0
+#define FW_CORRECTION_ID            1
+#define HW_MAJOR_ID                 0
+#define HW_MINOR_ID                 0
+#define HW_CORRECTION_ID            0
+
 #define TEST_TASK_MEM               0   //TODO: Reset to 0 when release
 #define TEST_ENCODER                0   //TODO: Reset to 0 when release
 /******************************************************************************
