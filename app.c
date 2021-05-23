@@ -40,6 +40,8 @@
 *******************************************************************************/
 #define QEI0_ISR_PRIORITY           5
 #define QEI1_ISR_PRIORITY           5
+#define UART_Q_LEN                  10
+#define UART_MSG_MAX_LEN            100
 
 
 /******************************************************************************
@@ -54,6 +56,8 @@
 
 #define TEST_TASK_MEM               0   //TODO: Reset to 0 when release
 #define TEST_ENCODER                0   //TODO: Reset to 0 when release
+#define TEST_MSG_Q                  0   //TODO: Reset to 0 when release
+
 /******************************************************************************
 * Task defines
 ******************************************************************************/
@@ -61,18 +65,24 @@
 #define M0SPEEDUPDATE_PRIORITY      tskIDLE_PRIORITY + 7
 #define M1SPEEDUPDATE_PRIORITY      tskIDLE_PRIORITY + 7
 #define MOTORDRIVER_PRIORITY        tskIDLE_PRIORITY + 5
+#define OUTPUT_MSG_PRIORITY         tskIDLE_PRIORITY + 6
 
 // Task stack size: In words (4-bytes)
+#define OUTPUTMSG_STACK_DEPTH       100
+
+#if TEST_MSG_Q
+#define MOTORDRIVER_STACK_DEPTH     64 + 100
+#else
 #define MOTORDRIVER_STACK_DEPTH     64
+#endif  /* End of TEST_MSG_Q */
+
 #if TEST_ENCODER
 #define M0SPEEDUPDATE_STACK_DEPTH   100
 #define M1SPEEDUPDATE_STACK_DEPTH   100
 #else
-#define M0SPEEDUPDATE_STACK_DEPTH   50
-#define M1SPEEDUPDATE_STACK_DEPTH   50
+#define M0SPEEDUPDATE_STACK_DEPTH   40
+#define M1SPEEDUPDATE_STACK_DEPTH   100
 #endif  /* End of TEST_ENCODER */
-
-#define TASK_TOTAL                  3
 
 
 /******************************************************************************
@@ -98,11 +108,18 @@ typedef struct
     TaskHandle_t * const TaskHandle;            /*< Pointer to task handle       */
 }TaskInitParams_t;
 
+typedef struct
+{
+    uint8_t DataLen;
+    char*   PData;
+}DataMsg_t;
+
 
 /******************************************************************************
 * Function Prototypes
 *******************************************************************************/
 static void Task_MotorDriver(void *pvParameters);
+static void Task_OutputMSG(void *pvParameters);
 static void Task_M0SpeedUpdate(void *pvParameters);
 static void Task_M1SpeedUpdate(void *pvParameters);
 
@@ -115,8 +132,8 @@ void ConfigureUART(void);
 TaskHandle_t xHandlerM0SpeedUpdate = NULL;
 TaskHandle_t xHandlerM1SpeedUpdate = NULL;
 TaskHandle_t xHandlerMotorDriver = NULL;
-
-xSemaphoreHandle g_pUARTSemaphore;  /* The mutex that protects concurrent access of UART from multiple tasks */
+QueueHandle_t xQueue_OutputMsg = NULL;
+SemaphoreHandle_t g_pUARTSemaphore;  /* The mutex that protects concurrent access of UART from multiple tasks */
 
 #if TEST_ENCODER
 int16_t speed_m0=0, speed_m1=0;
@@ -129,9 +146,10 @@ int8_t g_set_duty0=40, g_set_duty1=40;
 TaskInitParams_t const TaskInitParameters[] =
 {
  // Pointer Task function,  Task String Name,   The task stack, Parameter Pointer, Task priority  ,     Task Handle
-   {&Task_MotorDriver,      "MotorDriver",    MOTORDRIVER_STACK_DEPTH,    NULL, MOTORDRIVER_PRIORITY,   &xHandlerMotorDriver},
-   {&Task_M0SpeedUpdate,    "M0SpeedUpdater", M0SPEEDUPDATE_STACK_DEPTH,  NULL, M0SPEEDUPDATE_PRIORITY, &xHandlerM0SpeedUpdate},
-   {&Task_M1SpeedUpdate,    "M1SpeedUpdater", M1SPEEDUPDATE_STACK_DEPTH,  NULL, M1SPEEDUPDATE_PRIORITY, &xHandlerM1SpeedUpdate},
+   {&Task_MotorDriver,      "MotorDriver",    MOTORDRIVER_STACK_DEPTH,      NULL, MOTORDRIVER_PRIORITY,     &xHandlerMotorDriver},
+   {&Task_M0SpeedUpdate,    "SpeedM0", M0SPEEDUPDATE_STACK_DEPTH,    NULL, M0SPEEDUPDATE_PRIORITY,   &xHandlerM0SpeedUpdate},
+   {&Task_M1SpeedUpdate,    "SpeedM1", M1SPEEDUPDATE_STACK_DEPTH,    NULL, M1SPEEDUPDATE_PRIORITY,   &xHandlerM1SpeedUpdate},
+   {&Task_OutputMSG,        "OutputMSG",      OUTPUTMSG_STACK_DEPTH,        NULL, OUTPUT_MSG_PRIORITY,      NULL},
 };
 
 
@@ -178,6 +196,19 @@ main(void)
     // Create a mutex to guard the UART.
     //
     g_pUARTSemaphore = xSemaphoreCreateMutex();
+    if(g_pUARTSemaphore == NULL)
+    {
+        UARTprintf("Can't create UART mutex \n");
+    }
+
+    //
+    // Create a message queue for output UART messages
+    //
+    xQueue_OutputMsg = xQueueCreate( UART_Q_LEN, sizeof(DataMsg_t) );
+    if(xQueue_OutputMsg == NULL)
+    {
+        UARTprintf("Can't create UART message queue \n");
+    }
 
     //
     // Create the LED task.
@@ -189,21 +220,10 @@ main(void)
         }
     }
 
-    //
-    // Create the switch task.
-    //
-    if(SwitchTaskInit() != 0)
-    {
-
-        for(;;)
-        {
-        }
-    }
-
 
     // Loop through the task table and create each task.
-    int TaskCount;
-    for (TaskCount = 0; TaskCount < TASK_TOTAL; ++TaskCount)
+    int TaskCount = 0;
+    for (; TaskCount < sizeof(TaskInitParameters) / sizeof(TaskInitParameters[0]); ++TaskCount)
     {
         BaseType_t xstatus = xTaskCreate(TaskInitParameters[TaskCount].TaskCodePtr,
                                          TaskInitParameters[TaskCount].TaskName,
@@ -227,8 +247,7 @@ main(void)
     vTaskStartScheduler();
 
     //
-    // In case the scheduler returns for some reason, print an error and loop
-    // forever.
+    // In case the scheduler returns for some reason, print an error and loop forever.
     //
 
     for(;;)
@@ -241,6 +260,40 @@ main(void)
 * Function Definitions
 *******************************************************************************/
 
+//*****************************************************************************
+//
+// This task is used to print message via UART
+//
+//*****************************************************************************
+static void
+Task_OutputMSG(void *pvParameters)
+{
+    DataMsg_t xReceivedStructure;
+    BaseType_t xStatus;
+    char output_msg[UART_MSG_MAX_LEN]={0};
+    for(;;)
+    {
+        xStatus = xQueueReceive( xQueue_OutputMsg, &xReceivedStructure, portMAX_DELAY);
+        if(xStatus == pdPASS)
+        {
+            /* Get the message inside queue */
+            memcpy(output_msg, xReceivedStructure.PData, xReceivedStructure.DataLen);
+            /* Print message to UART */
+            xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
+            UARTprintf("Data in output queue: %s", output_msg);
+            xSemaphoreGive(g_pUARTSemaphore);
+            /* Free up processed data */
+            vPortFree(xReceivedStructure.PData);
+            memset(output_msg, 0, UART_MSG_MAX_LEN);
+        }
+        #if TEST_TASK_MEM
+        xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
+        UARTprintf("OutputMSG Stack left %d \n", uxTaskGetStackHighWaterMark());
+        xSemaphoreGive(g_pUARTSemaphore);
+        #endif  /* End of TEST_TASK_MEM */
+    }
+
+}
 
 //*****************************************************************************
 //
@@ -260,14 +313,35 @@ Task_MotorDriver(void *pvParameters)
        Post on semaphore*/
 //        UARTprintf("Current motor 0 speed: %d \n", g_set_duty0);
 //        UARTprintf("Current motor 1 speed: %d \n", g_set_duty1);
+        #if TEST_MSG_Q
+        BaseType_t xStatus;
+        DataMsg_t data_send;
+        char send_msg[UART_MSG_MAX_LEN] = "Data send to message Q \n";
+        data_send.DataLen = strlen(send_msg) + 1; /* Plus null terminator */
+        char* p_send_msg = (char*) pvPortMalloc(data_send.DataLen);
+        memcpy(p_send_msg, send_msg, data_send.DataLen);
+        data_send.PData = p_send_msg;
+        xStatus = xQueueSendToBack( xQueue_OutputMsg, &data_send, 0);
+        if(xStatus != pdPASS)
+        {
+//            xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
+//            UARTprintf("Message sent \n");
+//            xSemaphoreGive(g_pUARTSemaphore);
+
+        }
+        memset(send_msg, 0, UART_MSG_MAX_LEN);
+        #endif  /* End of TEST_MSG_Q */
+
         #if TEST_ENCODER
         Motor0_UpdateSpeed(g_set_duty0);
         Motor1_UpdateSpeed(g_set_duty1);
         #endif  /* End of TEST_ENCODER */
         #if TEST_TASK_MEM
+        xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
         UARTprintf("Motordrive Stack left %d \n", uxTaskGetStackHighWaterMark(xHandlerMotorDriver));
+        xSemaphoreGive(g_pUARTSemaphore);
         #endif  /* End of TEST_TASK_MEM */
-        vTaskDelay(10);
+        vTaskDelay(100);
     }
 }
 
@@ -288,14 +362,18 @@ Task_M0SpeedUpdate(void *pvParameters)
         Update_Velocity0(&speed_m0);
         if (speed_m0 < g_est_speed0)
         {
+            xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
             UARTprintf("Failed: cur_speed0: %d - min_est_speed1: %d \n", speed_m0, g_est_speed0);
+            xSemaphoreGive(g_pUARTSemaphore);
+
         }
         #endif  /* End of !TEST_ENCODER */
         #if TEST_TASK_MEM
+        xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
         UARTprintf("Motor 0 Speed update Stack left %d \n", uxTaskGetStackHighWaterMark(xHandlerM0SpeedUpdate));
+        xSemaphoreGive(g_pUARTSemaphore);
         #endif  /* End of TEST_TASK_MEM */
         ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); /* Clear the notification value and block indefinitely */
-
     }
 }
 
@@ -312,11 +390,15 @@ Task_M1SpeedUpdate(void *pvParameters)
         Update_Velocity1(&speed_m1);
         if (speed_m1 < g_est_speed1)
         {
+            xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
             UARTprintf("Failed: cur_speed1: %d - min_est_speed1: %d \n", speed_m1, g_est_speed1);
+            xSemaphoreGive(g_pUARTSemaphore);
         }
         #endif  /* End of !TEST_ENCODER */
         #if TEST_TASK_MEM
+        xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
         UARTprintf("Motor 1 Speed update Stack left %d \n", uxTaskGetStackHighWaterMark(xHandlerM1SpeedUpdate));
+        xSemaphoreGive(g_pUARTSemaphore);
         #endif  /* End of TEST_TASK_MEM */
         ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); /* Clear the notification value and block indefinitely */
     }
@@ -374,11 +456,18 @@ vApplicationStackOverflowHook(xTaskHandle *pxTask, char *pcTaskName)
 {
     //
     // This function can not return, so loop forever.  Interrupts are disabled
-    // on entry to this function, so no processor interrupts will interrupt
-    // this loop.
+    // on entry to this function, so no processor interrupts will interrupt this loop.
     //
+    char* taskname_derived = pcTaskGetTaskName(pxTask);
+    char* taskname_return = pcTaskName;
+    /* Re-check since data can be corrupted by overflowed */
+    if (strcmp(taskname_derived, taskname_return) == 0)
+    {
+        UARTprintf("Task %s overflowed \n", taskname_return);
+    }
     for(;;)
     {
+
     }
 }
 

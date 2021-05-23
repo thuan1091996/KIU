@@ -97,6 +97,7 @@ to exclude the API function. */
 #define INCLUDE_vTaskDelayUntil             1
 #define INCLUDE_vTaskDelay                  1
 #define INCLUDE_uxTaskGetStackHighWaterMark 1
+#define INCLUDE_pcTaskGetTaskName           1
 
 /* Be ENORMOUSLY careful if you want to modify these two values and make sure
  * you read http://www.freertos.org/a00110.html#kernel_priority first!
