@@ -79,7 +79,7 @@ void BridgeH_PWM_Init(void)
  */
 void Motor1_UpdateSpeed(int8_t i8_M1Duty)
 {
-    static uint8_t cur_duty1=0;                 /* Running duty */
+    static int8_t cur_duty1=0;                 /* Running duty */
     if (i8_M1Duty != cur_duty1)
     {
         int32_t temp_load1 = ( (LOAD_PWM * i8_M1Duty) /100) - 1;
@@ -95,6 +95,10 @@ void Motor1_UpdateSpeed(int8_t i8_M1Duty)
         else if(i8_M1Duty == 0)
         {
             Motor1_Stop();
+        }
+        else
+        {
+
         }
         PWMPulseWidthSet(BRIDGEH_PWM_PORT, PWM_OUT_4, abs(temp_load1) );
         cur_duty1=i8_M1Duty;                              //backup previous value
@@ -138,7 +142,7 @@ static void Motor1_Stop(void)
  */
 void Motor0_UpdateSpeed(int8_t i8_M0Duty)
 {
-    static uint8_t cur_duty0=0;                 /* Running duty */
+    static int8_t cur_duty0=0;                 /* Running duty */
     if (i8_M0Duty != cur_duty0)
     {
         int32_t temp_load0 = ( (LOAD_PWM * i8_M0Duty) /100) -1;
@@ -154,6 +158,10 @@ void Motor0_UpdateSpeed(int8_t i8_M0Duty)
         else if(i8_M0Duty == 0)
         {
             Motor0_Stop();
+        }
+        else
+        {
+
         }
         PWMPulseWidthSet(BRIDGEH_PWM_PORT, PWM_OUT_5,abs(temp_load0) );
         cur_duty0=i8_M0Duty;                              //backup previous value
