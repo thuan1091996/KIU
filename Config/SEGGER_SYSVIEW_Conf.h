@@ -79,6 +79,8 @@ Additional information:
 **********************************************************************
 */
 
+#define SEGGER_SYSVIEW_CORE_CM3             2 // Cortex-M3/M4/M7
+#define SEGGER_SYSVIEW_RTT_BUFFER_SIZE      1024                                // Number of bytes that SystemView uses for the buffer.
 
 #endif  // SEGGER_SYSVIEW_CONF_H
 
