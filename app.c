@@ -73,15 +73,15 @@
 #if TEST_MSG_Q
 #define MOTORDRIVER_STACK_DEPTH     64 + 100
 #else
-#define MOTORDRIVER_STACK_DEPTH     64
+#define MOTORDRIVER_STACK_DEPTH     100
 #endif  /* End of TEST_MSG_Q */
 
 #if TEST_ENCODER
 #define M0SPEEDUPDATE_STACK_DEPTH   100
 #define M1SPEEDUPDATE_STACK_DEPTH   100
 #else
-#define M0SPEEDUPDATE_STACK_DEPTH   40
-#define M1SPEEDUPDATE_STACK_DEPTH   100
+#define M0SPEEDUPDATE_STACK_DEPTH   200
+#define M1SPEEDUPDATE_STACK_DEPTH   200
 #endif  /* End of TEST_ENCODER */
 
 
@@ -166,6 +166,8 @@ main(void)
     //
     ROM_SysCtlClockSet(SYSCTL_SYSDIV_2_5| SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
 
+
+    HWREG(DWT_BASE) |= 0x01;
     //
     // Initialize the UART and configure it for 115,200, 8-N-1 operation.
     //
@@ -191,6 +193,10 @@ main(void)
     UARTprintf("Encoder0 driver was initialized successfully \n");
     QEI1_Init(QEI1_ISR_PRIORITY);
     UARTprintf("Encoder1 driver was initialized successfully \n");
+
+    SEGGER_SYSVIEW_Conf();
+    SEGGER_SYSVIEW_Start();
+
 
     //
     // Create a mutex to guard the UART.
