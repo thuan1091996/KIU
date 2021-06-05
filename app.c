@@ -35,6 +35,7 @@
 
 #include "UserLibraries/BridgeH.h"
 #include "UserLibraries/Encoder.h"
+#include "UserLibraries/Algorithm.h"
 /******************************************************************************
 * Module pre-processor
 *******************************************************************************/
@@ -57,32 +58,23 @@
 #define TEST_TASK_MEM               0   //TODO: Reset to 0 when release
 #define TEST_ENCODER                0   //TODO: Reset to 0 when release
 #define TEST_MSG_Q                  0   //TODO: Reset to 0 when release
-
+#define TEST_PID_M0                 1
+#define TEST_PID_M1                 1
 /******************************************************************************
 * Task defines
 ******************************************************************************/
 // Task priorities: Higher -> More important
 #define M0SPEEDUPDATE_PRIORITY      tskIDLE_PRIORITY + 7
 #define M1SPEEDUPDATE_PRIORITY      tskIDLE_PRIORITY + 7
-#define MOTORDRIVER_PRIORITY        tskIDLE_PRIORITY + 5
-#define OUTPUT_MSG_PRIORITY         tskIDLE_PRIORITY + 6
-
+#define M0CALPID_PRIORITY           tskIDLE_PRIORITY + 6
+#define M1CALPID_PRIORITY           tskIDLE_PRIORITY + 6
+#define OUTPUT_MSG_PRIORITY         tskIDLE_PRIORITY + 5
 // Task stack size: In words (4-bytes)
-#define OUTPUTMSG_STACK_DEPTH       100
-
-#if TEST_MSG_Q
-#define MOTORDRIVER_STACK_DEPTH     64 + 100
-#else
-#define MOTORDRIVER_STACK_DEPTH     100
-#endif  /* End of TEST_MSG_Q */
-
-#if TEST_ENCODER
+#define OUTPUTMSG_STACK_DEPTH       200
+#define M0CALPID_STACK_DEPTH        300
+#define M1CALPID_STACK_DEPTH        300
 #define M0SPEEDUPDATE_STACK_DEPTH   100
 #define M1SPEEDUPDATE_STACK_DEPTH   100
-#else
-#define M0SPEEDUPDATE_STACK_DEPTH   200
-#define M1SPEEDUPDATE_STACK_DEPTH   200
-#endif  /* End of TEST_ENCODER */
 
 
 /******************************************************************************
@@ -118,38 +110,74 @@ typedef struct
 /******************************************************************************
 * Function Prototypes
 *******************************************************************************/
-static void Task_MotorDriver(void *pvParameters);
 static void Task_OutputMSG(void *pvParameters);
 static void Task_M0SpeedUpdate(void *pvParameters);
 static void Task_M1SpeedUpdate(void *pvParameters);
-
+static void Task_M0CalPID(void *pvParameters);
+static void Task_M1CalPID(void *pvParameters);
 
 
 void ConfigureUART(void);
 /******************************************************************************
 * Module Variable Definitions
 *******************************************************************************/
-TaskHandle_t xHandlerM0SpeedUpdate = NULL;
-TaskHandle_t xHandlerM1SpeedUpdate = NULL;
-TaskHandle_t xHandlerMotorDriver = NULL;
-QueueHandle_t xQueue_OutputMsg = NULL;
+PID_t pid_m0 =
+{
+     .p_gain           = 0.37,
+     .i_gain           = 0.116,
+     .d_gain           = 0.12,
+     .integrate_max    = 1000,
+     .integrate_min    = -1000,
+     .drive_max        = 100,
+     .drive_min        =-100,
+     .prev_err         = 0.0
+};
+
+PID_t pid_m1 =
+{
+     .p_gain           = 0.23,
+     .i_gain           = 0.1,
+     .d_gain           = 0.04,
+     .integrate_max    = 1000,
+     .integrate_min    = -1000,
+     .drive_max        = 100,
+     .drive_min        =-100,
+     .prev_err         = 0.0
+};
+
+TaskHandle_t    xHandlerM0SpeedUpdate   = NULL;
+TaskHandle_t    xHandlerM1SpeedUpdate   = NULL;
+TaskHandle_t    xHandlerM0CalPID        = NULL;
+TaskHandle_t    xHandlerM1CalPID        = NULL;
+QueueHandle_t   xQueue_OutputMsg        = NULL;
+
 SemaphoreHandle_t g_pUARTSemaphore;  /* The mutex that protects concurrent access of UART from multiple tasks */
 
 #if TEST_ENCODER
 int16_t speed_m0=0, speed_m1=0;
 int16_t g_est_speed0=50, g_est_speed1=50;
-int8_t g_set_duty0=40, g_set_duty1=40;
 #endif  /* End of TEST_ENCODER */
+
+#if TEST_PID_M1
+int16_t set_speed_m1=100;
+int8_t  g_set_duty1=0;
+#endif  /* End of TEST_PID_M1 */
+
+#if TEST_PID_M0
+int16_t set_speed_m0=100;
+int8_t g_set_duty0=40;
+#endif  /* End of TEST_PID_M0 */
 
 
 /* Task configuration table that contains all the parameters necessary to initialize the system tasks. */
 TaskInitParams_t const TaskInitParameters[] =
 {
- // Pointer Task function,  Task String Name,   The task stack, Parameter Pointer, Task priority  ,     Task Handle
-   {&Task_MotorDriver,      "MotorDriver",    MOTORDRIVER_STACK_DEPTH,      NULL, MOTORDRIVER_PRIORITY,     &xHandlerMotorDriver},
-   {&Task_M0SpeedUpdate,    "SpeedM0", M0SPEEDUPDATE_STACK_DEPTH,    NULL, M0SPEEDUPDATE_PRIORITY,   &xHandlerM0SpeedUpdate},
-   {&Task_M1SpeedUpdate,    "SpeedM1", M1SPEEDUPDATE_STACK_DEPTH,    NULL, M1SPEEDUPDATE_PRIORITY,   &xHandlerM1SpeedUpdate},
-   {&Task_OutputMSG,        "OutputMSG",      OUTPUTMSG_STACK_DEPTH,        NULL, OUTPUT_MSG_PRIORITY,      NULL},
+ // Pointer Task function,  Task String Name,   The task stack,     Parameter Pointer, Task priority  ,     Task Handle
+   {&Task_M0SpeedUpdate,    "NewSpeedM0",       M0SPEEDUPDATE_STACK_DEPTH,  NULL, M0SPEEDUPDATE_PRIORITY,   &xHandlerM0SpeedUpdate},
+   {&Task_M1SpeedUpdate,    "NewSpeedM1",       M1SPEEDUPDATE_STACK_DEPTH,  NULL, M1SPEEDUPDATE_PRIORITY,   &xHandlerM1SpeedUpdate},
+   {&Task_M0CalPID,         "PIDM0",            M0CALPID_STACK_DEPTH,       NULL, M0CALPID_PRIORITY,        &xHandlerM0CalPID},
+   {&Task_M1CalPID,         "PIDM1",            M1CALPID_STACK_DEPTH,       NULL, M1CALPID_PRIORITY,        &xHandlerM1CalPID},
+   {&Task_OutputMSG,        "OutputMSG",        OUTPUTMSG_STACK_DEPTH,      NULL, OUTPUT_MSG_PRIORITY,      NULL},
 };
 
 
@@ -168,6 +196,8 @@ main(void)
 
 
     HWREG(DWT_BASE) |= 0x01;
+
+
     //
     // Initialize the UART and configure it for 115,200, 8-N-1 operation.
     //
@@ -268,6 +298,64 @@ main(void)
 
 //*****************************************************************************
 //
+// This task is used to get new duty1 value for motor1
+//
+//*****************************************************************************
+
+static void
+Task_M0CalPID(void *pvParameters)
+{
+    BaseType_t xStatus;
+    int16_t speed_m0_recv=0;
+    for(;;)
+    {
+        xStatus = xTaskNotifyWait(0, 0, (int16_t*)&speed_m0_recv, portMAX_DELAY);
+        if(xStatus == pdPASS)
+        {
+            g_set_duty0 = (int8_t)UpdatePID(&pid_m0, set_speed_m0 - speed_m0_recv);
+            Motor0_UpdateSpeed(g_set_duty0);
+            #if TEST
+            xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
+            UARTprintf("Speed received PID1: %d \n", speed_m1_recv);
+            xSemaphoreGive(g_pUARTSemaphore);
+            #endif
+        }
+        #if TEST_TASK_MEM
+        xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
+        UARTprintf("Calculate PID motor 1 stack left: %d\n", uxTaskGetStackHighWaterMark(xHandlerM1CalPID));
+        xSemaphoreGive(g_pUARTSemaphore);
+        #endif  /* End of TEST_TASK_MEM */
+    }
+}
+
+static void
+Task_M1CalPID(void *pvParameters)
+{
+    BaseType_t xStatus;
+    int16_t speed_m1_recv=0;
+    for(;;)
+    {
+        xStatus = xTaskNotifyWait(0, 0, (int16_t*)&speed_m1_recv, portMAX_DELAY);
+        if(xStatus == pdPASS)
+        {
+            g_set_duty1 = (int8_t)UpdatePID(&pid_m1, set_speed_m1 - speed_m1_recv);
+            Motor1_UpdateSpeed(g_set_duty1);
+            #if TEST
+            xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
+            UARTprintf("Speed received PID1: %d \n", speed_m1_recv);
+            xSemaphoreGive(g_pUARTSemaphore);
+            #endif
+        }
+        #if TEST_TASK_MEM
+        xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
+        UARTprintf("Calculate PID motor 1 stack left: %d\n", uxTaskGetStackHighWaterMark(xHandlerM1CalPID));
+        xSemaphoreGive(g_pUARTSemaphore);
+        #endif  /* End of TEST_TASK_MEM */
+    }
+}
+
+//*****************************************************************************
+//
 // This task is used to print message via UART
 //
 //*****************************************************************************
@@ -298,57 +386,6 @@ Task_OutputMSG(void *pvParameters)
         xSemaphoreGive(g_pUARTSemaphore);
         #endif  /* End of TEST_TASK_MEM */
     }
-
-}
-
-//*****************************************************************************
-//
-// This task is used to drive the speed of the motors
-//
-//*****************************************************************************
-static void
-Task_MotorDriver(void *pvParameters)
-{
-    for(;;)
-    {
-    /* Pend on semaphore
-         * If the speed of motor0 change
-         *  => Update motor0 speed
-         * else if the speed of motor1 change
-         *  => Update motor 1 speed
-       Post on semaphore*/
-//        UARTprintf("Current motor 0 speed: %d \n", g_set_duty0);
-//        UARTprintf("Current motor 1 speed: %d \n", g_set_duty1);
-        #if TEST_MSG_Q
-        BaseType_t xStatus;
-        DataMsg_t data_send;
-        char send_msg[UART_MSG_MAX_LEN] = "Data send to message Q \n";
-        data_send.DataLen = strlen(send_msg) + 1; /* Plus null terminator */
-        char* p_send_msg = (char*) pvPortMalloc(data_send.DataLen);
-        memcpy(p_send_msg, send_msg, data_send.DataLen);
-        data_send.PData = p_send_msg;
-        xStatus = xQueueSendToBack( xQueue_OutputMsg, &data_send, 0);
-        if(xStatus != pdPASS)
-        {
-//            xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
-//            UARTprintf("Message sent \n");
-//            xSemaphoreGive(g_pUARTSemaphore);
-
-        }
-        memset(send_msg, 0, UART_MSG_MAX_LEN);
-        #endif  /* End of TEST_MSG_Q */
-
-        #if TEST_ENCODER
-        Motor0_UpdateSpeed(g_set_duty0);
-        Motor1_UpdateSpeed(g_set_duty1);
-        #endif  /* End of TEST_ENCODER */
-        #if TEST_TASK_MEM
-        xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
-        UARTprintf("Motordrive Stack left %d \n", uxTaskGetStackHighWaterMark(xHandlerMotorDriver));
-        xSemaphoreGive(g_pUARTSemaphore);
-        #endif  /* End of TEST_TASK_MEM */
-        vTaskDelay(100);
-    }
 }
 
 //*****************************************************************************
@@ -359,13 +396,14 @@ Task_MotorDriver(void *pvParameters)
 static void
 Task_M0SpeedUpdate(void *pvParameters)
 {
+    int16_t speed_m0=0;
     for(;;)
     {
         #if !TEST_ENCODER
-        int16_t speed_m0;
         Update_Velocity0(&speed_m0);
         #else
         Update_Velocity0(&speed_m0);
+        Motor0_UpdateSpeed(g_set_duty0);
         if (speed_m0 < g_est_speed0)
         {
             xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
@@ -374,11 +412,13 @@ Task_M0SpeedUpdate(void *pvParameters)
 
         }
         #endif  /* End of !TEST_ENCODER */
+
         #if TEST_TASK_MEM
         xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
         UARTprintf("Motor 0 Speed update Stack left %d \n", uxTaskGetStackHighWaterMark(xHandlerM0SpeedUpdate));
         xSemaphoreGive(g_pUARTSemaphore);
         #endif  /* End of TEST_TASK_MEM */
+		xTaskNotify(xHandlerM0CalPID, speed_m0, eSetValueWithOverwrite); /* Send speed to to CalPID task */
         ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); /* Clear the notification value and block indefinitely */
     }
 }
@@ -386,10 +426,10 @@ Task_M0SpeedUpdate(void *pvParameters)
 static void
 Task_M1SpeedUpdate(void *pvParameters)
 {
+    int16_t speed_m1=0;
     for(;;)
     {
         #if !TEST_ENCODER
-        int16_t speed_m1;
         Update_Velocity1(&speed_m1);
         #else
         Motor1_UpdateSpeed(g_set_duty1);
@@ -401,11 +441,13 @@ Task_M1SpeedUpdate(void *pvParameters)
             xSemaphoreGive(g_pUARTSemaphore);
         }
         #endif  /* End of !TEST_ENCODER */
+
         #if TEST_TASK_MEM
         xSemaphoreTake(g_pUARTSemaphore, portMAX_DELAY);
         UARTprintf("Motor 1 Speed update Stack left %d \n", uxTaskGetStackHighWaterMark(xHandlerM1SpeedUpdate));
         xSemaphoreGive(g_pUARTSemaphore);
         #endif  /* End of TEST_TASK_MEM */
+        xTaskNotify(xHandlerM1CalPID, speed_m1, eSetValueWithOverwrite); /* Send speed to to CalPID task */
         ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); /* Clear the notification value and block indefinitely */
     }
 }
